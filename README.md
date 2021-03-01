@@ -15,4 +15,9 @@ Other physical items:
 * To distribute water I used an old piece of broken drip distribution tubing; just drilled some holes in it where I wanted water to come out faster
 * To mount the Wio Terminal and and the water level sensor in place I 3D printed some brackets; the .stl files are part of this github repo
 
+There are actually two Arduino sketches included
+
+* `simple_self_watering_plant_system.ino` uses the full sensor/compute package but is stripped of any display code. Read this to see how the feedback loop between sensors and watering works. Pukes lots of debug info to serial
+* `wio_terminal_self_watering_plant_system.ino` includes all the code for displaying info on the Wio Terminal. Same underlying feedback loop
+
 If you find this useful, let me know.
