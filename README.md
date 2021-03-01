@@ -18,6 +18,6 @@ Other physical items:
 There are actually two Arduino sketches included
 
 * `simple_self_watering_plant_system.ino` uses the full sensor/compute package but is stripped of any display code. Read this to see how the feedback loop between sensors and watering works. Pukes lots of debug info to serial
-* `wio_terminal_self_watering_plant_system.ino` includes all the code for displaying info on the Wio Terminal. Same underlying feedback loop
+* `wio_terminal_self_watering_plant_system.ino` includes all the code for displaying info on the Wio Terminal, allows you to toggle LCD with top buttons and allows you to use joystick to adjust moisture level. Same underlying feedback loop for watering
 
 If you find this useful, let me know.
