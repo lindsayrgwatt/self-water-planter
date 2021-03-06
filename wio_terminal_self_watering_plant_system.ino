@@ -240,7 +240,7 @@ void loop() {
   old_moisture_converted = actual_moisture_converted;
   actual_moisture_converted = convertRawInputToCalibratedValue(getSoilMoistureLevel());
   
-  /* Enabled for debug
+  /* Enable for debug
   SERIAL.print("moisture value = ");
   SERIAL.println(actual_moisture_converted);
   SERIAL.print("raw moisture reading = ");
@@ -256,6 +256,9 @@ void loop() {
 
   // Watering logic
   if (actual_water_level <= min_water_level) {
+    if (lcd_on == false) {
+      toggleLCDBacklight();
+    }
     if (out_of_water_display == false) {
       displayOutOfWater();
       out_of_water_display = true;
@@ -279,5 +282,5 @@ void loop() {
       }
     }
   }
-  delay(5000);
+  delay(1000);
 }
