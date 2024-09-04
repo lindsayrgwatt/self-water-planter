@@ -26,9 +26,8 @@ unsigned char low_data[8] = {0};
 unsigned char high_data[12] = {0};
 
 volatile int target_moisture = 20; /* % between 0-100 */
-int actual_moisture_raw = 0;
-volatile int actual_moisture_converted = 0;
-int old_moisture_converted = 0; /* Used to update screen on change */
+volatile int current_moisture_level = 0;
+volatile int old_moisture_level = 0;
 
 int min_water_level = 25;
 int actual_water_level = 0;
@@ -37,10 +36,37 @@ bool out_of_water = false;
 bool out_of_water_display = false;
 bool pump_on = false;
 bool lcd_on = false;
+bool update_target = true;
 
+// Non-blocking delay variables
+unsigned long previousMillis = 0;
+const long interval = 1000;
 
 // Display
 TFT_eSPI tft; //initialize TFT LCD 
+
+void setupSensors() {
+  pinMode(0, OUTPUT); // Relay for pump
+  pinMode(6, INPUT); // Moisture sensor
+  pinMode(WIO_KEY_A, INPUT); // Button A
+  pinMode(WIO_KEY_B, INPUT); // Button B
+  pinMode(WIO_KEY_C, INPUT); // Button C
+}
+
+void initializeDisplay() {
+  tft.begin(); //start TFT LCD 
+  tft.setRotation(3); //set screen rotation 
+  tft.setTextSize(2);
+  tft.setTextColor(TFT_YELLOW); //set text color
+  tft.fillScreen(TFT_RED);
+
+  // Empty screen
+  tft.setTextSize(3);
+  tft.drawString("Moisture Level", 40,90);
+  tft.setTextSize(2);
+  tft.drawString("Target", 60, 140);
+  tft.drawString("Actual", 190, 140);
+}
 
 // Helper functions for getting water level
 void getHigh12SectionValue(void)
@@ -99,10 +125,12 @@ int getWaterLevel()
 
 int getSoilMoistureLevel()
 {
-  return analogRead(6); //connect sensor to Analog 1
-}
+  int input;
+  input = analogRead(6); //connect sensor to Analog 1
 
-int convertRawInputToCalibratedValue(int input) {
+  SERIAL.print("raw moisture reading = ");
+  SERIAL.println(input);
+
   int air = 780; // From testing, air immersion value: 300
   int water = 425; // From testing, water immersion value: 250
   int converted;
@@ -110,9 +138,9 @@ int convertRawInputToCalibratedValue(int input) {
   if (input >= air) {
     converted = 0;
   } else if (input <= water) {
-    converted = 100;
+    converted = 99;
   } else {
-    converted = 100 - ((input - water) * 100)/(air - water);
+    converted = 100 * (air - input)/(air - water);
   }
 
   return converted;
@@ -133,7 +161,7 @@ void increaseTargetMoistureLevel() {
   if (target_moisture >= 95) {
     target_moisture = 95; // 100% throws off formatting
   }
-  updateTargetMoistureLevel(target_moisture);
+  update_target = true;
 }
 
 void decreaseTargetMoistureLevel() {
@@ -141,138 +169,79 @@ void decreaseTargetMoistureLevel() {
   if (target_moisture <= 10) {
     target_moisture = 10; // <10% throws off formatting
   }
-  updateTargetMoistureLevel(target_moisture);
-}
-
-
-// Following functions are all for drawing values on the screeen
-void drawMoistureLevel(int target, int actual) {
-  tft.setTextSize(5);
-  tft.fillRect(0, 160, 320, 80, TFT_RED);
-  tft.drawNumber(target, 55, 170);
-  tft.setTextSize(4);
-  tft.drawString("%", 115, 177);
-  tft.setTextSize(5);
-  tft.drawNumber(actual, 185, 170);
-  tft.setTextSize(4);
-  tft.drawString("%", 245, 177);
-  tft.setTextSize(5);
-  tft.setTextSize(2);
-}
-
-void drawInitialScreen() {
-  tft.fillRect(0,80,320, 40, TFT_RED);
-  tft.setTextSize(3);
-  tft.drawString("Moisture Level", 40,90);
-  tft.setTextSize(2);
-  tft.fillRect(0,120,320, 40, TFT_RED);
-  tft.drawString("Target", 60, 140);
-  tft.drawString("Actual", 190, 140);
- 
-}
-
-void updateActualMoistureLevel(int actual) {
-  tft.fillRect(185,170,59,70, TFT_RED);
-  tft.setTextSize(5);
-  tft.drawNumber(actual, 185, 170);
-  tft.setTextSize(2);
-}
-
-void updateTargetMoistureLevel(int target) {
-  tft.fillRect(55,170,59,70, TFT_RED);
-  tft.setTextSize(5);
-  tft.drawNumber(target, 55, 170);
-  tft.setTextSize(2);
-}
-
-void displayOutOfWater() {
-  tft.fillRect(0, 0, 320, 25, TFT_RED);
-  tft.drawString("out of water", 5, 5);
-};
-
-void removeOutOfWaterMessage() {
-  tft.fillRect(0, 0, 320, 25, TFT_BLACK);
+  update_target = true;
 }
 
 void toggleLCDBacklight() {
   if (lcd_on == true) {
-    digitalWrite(LCD_BACKLIGHT, LOW);
     lcd_on = false;
   } else {
-    digitalWrite(LCD_BACKLIGHT, HIGH);
     lcd_on = true;
   }
 }
 
-void setup() {
-  SERIAL.begin(115200);
-  Wire.begin();
-
-  pinMode(0, OUTPUT); // Relay for pump
-  pinMode(6, INPUT); // Moisture sensor
-  pinMode(WIO_KEY_A, INPUT); //set button A pin as input 
-  pinMode(WIO_KEY_B, INPUT); //set button B pin as input 
-  pinMode(WIO_KEY_C, INPUT); //set button C pin as input 
-
-  attachInterrupt(digitalPinToInterrupt(WIO_5S_RIGHT), increaseTargetMoistureLevel, RISING);
-  attachInterrupt(digitalPinToInterrupt(WIO_5S_LEFT), decreaseTargetMoistureLevel, RISING);
-  attachInterrupt(digitalPinToInterrupt(WIO_KEY_A), toggleLCDBacklight, FALLING);
-  attachInterrupt(digitalPinToInterrupt(WIO_KEY_B), toggleLCDBacklight, FALLING);
-  attachInterrupt(digitalPinToInterrupt(WIO_KEY_C), toggleLCDBacklight, FALLING);
-
-  tft.begin(); //start TFT LCD 
-  tft.setRotation(3); //set screen rotation 
-  tft.setTextSize(2);
-  tft.setTextColor(TFT_YELLOW); //set text color
-  tft.fillScreen(TFT_BLACK);
-
-  drawInitialScreen();  
-
-  lcd_on = true;
-
-  old_moisture_converted = convertRawInputToCalibratedValue(getSoilMoistureLevel());
-  actual_moisture_converted = old_moisture_converted;
-  drawMoistureLevel(target_moisture, actual_moisture_converted);
+void updateTarget(int target) {
+  tft.setTextSize(5);
+  tft.fillRect(55,170,59,70, TFT_RED);
+  tft.drawNumber(target, 55, 170);
+  tft.setTextSize(4);
+  tft.drawString("%", 115, 177);
 }
 
-void loop() {
-  actual_water_level = getWaterLevel();
-  old_moisture_converted = actual_moisture_converted;
-  actual_moisture_converted = convertRawInputToCalibratedValue(getSoilMoistureLevel());
-  
-  /* Enable for debug
-  SERIAL.print("moisture value = ");
-  SERIAL.println(actual_moisture_converted);
-  SERIAL.print("raw moisture reading = ");
-  SERIAL.println(getSoilMoistureLevel());
-  SERIAL.print("target value = ");
-  SERIAL.println(target_moisture);
-  */
-  
-  // Display logic
-  if (actual_moisture_converted != old_moisture_converted) {
-    updateActualMoistureLevel(actual_moisture_converted);
+void updateDisplay(int target, int actual, int old) { 
+  if (update_target == true) {
+    updateTarget(target);
+    update_target = false;
+  }
+  if (actual != old) {
+    tft.setTextSize(5);
+    tft.fillRect(185,170,59,70, TFT_RED);
+    tft.drawNumber(actual, 185, 170);
+    tft.setTextSize(4);
+    tft.drawString("%", 245, 177);
   }
 
-  // Watering logic
+  tft.setTextSize(2);
+
+  if (out_of_water_display == true) {
+    tft.drawString("out of water", 5, 5);
+  } else {
+    tft.fillRect(0, 0, 320, 25, TFT_RED);
+  }
+
+  if (lcd_on == true) {
+    digitalWrite(LCD_BACKLIGHT, HIGH);
+  } else {
+    digitalWrite(LCD_BACKLIGHT, LOW);
+  }
+}
+
+void handleSensorsAndLogic() {
+  actual_water_level = getWaterLevel();
+  current_moisture_level = getSoilMoistureLevel();
+  
+  SERIAL.print("water level = ");
+  SERIAL.println(actual_water_level);
+  SERIAL.print("moisture value = ");
+  SERIAL.println(current_moisture_level);
+  SERIAL.print("target value = ");
+  SERIAL.println(target_moisture);
+
   if (actual_water_level <= min_water_level) {
     if (lcd_on == false) {
-      toggleLCDBacklight();
+      lcd_on = true; // Force light on
     }
     if (out_of_water_display == false) {
-      displayOutOfWater();
       out_of_water_display = true;
-    }
-    
+    }    
     if (pump_on == true) {
       turnOffPump();
     }
   } else {
     if (out_of_water_display == true) {
-      removeOutOfWaterMessage();
       out_of_water_display = false;
     }
-    if (actual_moisture_converted > target_moisture) {
+    if (current_moisture_level > target_moisture) {
       if (pump_on == true) {
         turnOffPump();
       }
@@ -282,5 +251,41 @@ void loop() {
       }
     }
   }
-  delay(1000);
+}
+
+void setup() {
+  Serial.begin(115200);
+  while(!Serial); // Wait for Serial to be ready
+
+  Wire.begin();
+
+  setupSensors();
+  
+  attachInterrupt(digitalPinToInterrupt(WIO_5S_RIGHT), increaseTargetMoistureLevel, RISING);
+  attachInterrupt(digitalPinToInterrupt(WIO_5S_LEFT), decreaseTargetMoistureLevel, RISING);
+  attachInterrupt(digitalPinToInterrupt(WIO_KEY_A), toggleLCDBacklight, FALLING);
+  attachInterrupt(digitalPinToInterrupt(WIO_KEY_B), toggleLCDBacklight, FALLING);
+  attachInterrupt(digitalPinToInterrupt(WIO_KEY_C), toggleLCDBacklight, FALLING);
+
+  initializeDisplay();
+  
+  current_moisture_level = getSoilMoistureLevel();
+  old_moisture_level = -1;
+
+  lcd_on = true;
+  update_target = true;
+}
+
+void loop() {
+  while(!Serial); // Wait for Serial to be ready
+  
+  updateDisplay(target_moisture, current_moisture_level, old_moisture_level);
+  old_moisture_level = current_moisture_level;
+
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+    handleSensorsAndLogic();
+  }
 }
