@@ -21,6 +21,8 @@
 
 #define INCREMENT 5 // Target moisture level increments
 
+bool serialEnabled = true;
+
 // Two variables below used for determining water depth
 unsigned char low_data[8] = {0};
 unsigned char high_data[12] = {0};
@@ -128,8 +130,10 @@ int getSoilMoistureLevel()
   int input;
   input = analogRead(6); //connect sensor to Analog 1
 
-  SERIAL.print("raw moisture reading = ");
-  SERIAL.println(input);
+  if (serialEnabled) {
+    SERIAL.print("raw moisture reading = ");
+    SERIAL.println(input);
+  }
 
   int air = 780; // From testing, air immersion value: 300
   int water = 425; // From testing, water immersion value: 250
@@ -220,12 +224,14 @@ void handleSensorsAndLogic() {
   actual_water_level = getWaterLevel();
   current_moisture_level = getSoilMoistureLevel();
   
-  SERIAL.print("water level = ");
-  SERIAL.println(actual_water_level);
-  SERIAL.print("moisture value = ");
-  SERIAL.println(current_moisture_level);
-  SERIAL.print("target value = ");
-  SERIAL.println(target_moisture);
+  if (serialEnabled) {
+    SERIAL.print("water level = ");
+    SERIAL.println(actual_water_level);
+    SERIAL.print("moisture value = ");
+    SERIAL.println(current_moisture_level);
+    SERIAL.print("target value = ");
+    SERIAL.println(target_moisture);
+  }
 
   if (actual_water_level <= min_water_level) {
     if (lcd_on == false) {
@@ -254,8 +260,9 @@ void handleSensorsAndLogic() {
 }
 
 void setup() {
-  Serial.begin(115200);
-  while(!Serial); // Wait for Serial to be ready
+  if (serialEnabled) {
+       Serial.begin(115200);
+     }
 
   Wire.begin();
 
@@ -277,7 +284,7 @@ void setup() {
 }
 
 void loop() {
-  while(!Serial); // Wait for Serial to be ready
+  //while(!Serial); // Wait for Serial to be ready
   
   updateDisplay(target_moisture, current_moisture_level, old_moisture_level);
   old_moisture_level = current_moisture_level;
