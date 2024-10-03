@@ -30,6 +30,7 @@ unsigned char high_data[12] = {0};
 volatile int target_moisture = 20; /* % between 0-100 */
 volatile int current_moisture_level = 0;
 volatile int old_moisture_level = 0;
+int hysteresis = 3; /* Relay will thrash on/off around target_moisture so overshoot via hysteresis */
 
 int min_water_level = 25;
 int actual_water_level = 0;
@@ -233,7 +234,7 @@ void handleSensorsAndLogic() {
     SERIAL.println(target_moisture);
   }
 
-  if (actual_water_level <= min_water_level) {
+  if (actual_water_level <= (min_water_level - hysteresis)) {
     if (lcd_on == false) {
       lcd_on = true; // Force light on
     }
