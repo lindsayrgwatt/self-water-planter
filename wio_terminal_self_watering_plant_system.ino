@@ -234,21 +234,21 @@ void handleSensorsAndLogic() {
     SERIAL.println(target_moisture);
   }
 
-  if (actual_water_level <= (min_water_level - hysteresis)) {
+  if (actual_water_level <= min_water_level) {
     if (lcd_on == false) {
       lcd_on = true; // Force light on
     }
     if (out_of_water_display == false) {
       out_of_water_display = true;
     }    
-    if (pump_on == true) {
+    if (pump_on == true and actual_water_level >= (min_water_level + hysteresis)) {
       turnOffPump();
     }
   } else {
     if (out_of_water_display == true) {
       out_of_water_display = false;
     }
-    if (current_moisture_level > target_moisture) {
+    if (current_moisture_level > (target_moisture + hysteresis)) {
       if (pump_on == true) {
         turnOffPump();
       }
