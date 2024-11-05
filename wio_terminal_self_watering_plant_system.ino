@@ -19,6 +19,10 @@
 #define ATTINY1_HIGH_ADDR   0x78
 #define ATTINY2_LOW_ADDR   0x77
 
+// Debounce interrupts
+#define DEBOUNCE_DELAY 50
+//#define HOLD_DURATION 100
+
 #define INCREMENT 5 // Target moisture level increments
 
 bool serialEnabled = true;
@@ -30,7 +34,20 @@ unsigned char high_data[12] = {0};
 volatile int target_moisture = 20; /* % between 0-100 */
 volatile int current_moisture_level = 0;
 volatile int old_moisture_level = 0;
-int hysteresis = 3; /* Relay will thrash on/off around target_moisture so overshoot via hysteresis */
+
+// Debounce interrupts & buttons
+volatile unsigned long lastInterruptTime = 0;
+unsigned long lastDebounceTime = 0;
+volatile bool buttonPressed = false;
+volatile unsigned long pressStartTime = 0;
+
+// Reduce thrash
+// Introduce hysteresis so relay won't thrash on/off around target_moisture. Overshoot
+// Use counters so that don't turn on pump if there is a spurious sensor reading
+int hysteresis = 3;
+int consecutiveLowReadings = 0;
+int consecutiveHighReadings = 0;
+const int requiredConsecutiveReadings = 3;
 
 int min_water_level = 25;
 int actual_water_level = 0;
@@ -52,8 +69,6 @@ void setupSensors() {
   pinMode(0, OUTPUT); // Relay for pump
   pinMode(6, INPUT); // Moisture sensor
   pinMode(WIO_KEY_A, INPUT); // Button A
-  pinMode(WIO_KEY_B, INPUT); // Button B
-  pinMode(WIO_KEY_C, INPUT); // Button C
 }
 
 void initializeDisplay() {
@@ -162,20 +177,32 @@ void turnOffPump() {
 }
 
 void increaseTargetMoistureLevel() {
-  target_moisture += INCREMENT;
-  if (target_moisture >= 95) {
-    target_moisture = 95; // 100% throws off formatting
+  if (lcd_on == true) {
+    unsigned long currentTime = millis();
+    if (currentTime - lastInterruptTime > DEBOUNCE_DELAY) {
+      lastInterruptTime = currentTime;
+      target_moisture += INCREMENT;
+      if (target_moisture >= 95) {
+        target_moisture = 95; // 100% throws off formatting
+      }
+      update_target = true;
+    }
   }
-  update_target = true;
 }
 
 void decreaseTargetMoistureLevel() {
-  target_moisture -= INCREMENT;
-  if (target_moisture <= 10) {
-    target_moisture = 10; // <10% throws off formatting
+  if (lcd_on == true) {
+      unsigned long currentTime = millis();
+      if (currentTime - lastInterruptTime > DEBOUNCE_DELAY) {
+        lastInterruptTime = currentTime;
+        target_moisture -= INCREMENT;
+        if (target_moisture <= 10) {
+          target_moisture = 10; // <10% throws off formatting
+        }
+        update_target = true;
+      }
+    }
   }
-  update_target = true;
-}
 
 void toggleLCDBacklight() {
   if (lcd_on == true) {
@@ -227,11 +254,24 @@ void handleSensorsAndLogic() {
   
   if (serialEnabled) {
     SERIAL.print("water level = ");
-    SERIAL.println(actual_water_level);
+    SERIAL.print(actual_water_level);
+    SERIAL.print(" vs. target = ");
+    SERIAL.println(min_water_level);
+
     SERIAL.print("moisture value = ");
-    SERIAL.println(current_moisture_level);
-    SERIAL.print("target value = ");
-    SERIAL.println(target_moisture);
+    SERIAL.print(current_moisture_level);
+    SERIAL.print(" vs. target value = ");
+    SERIAL.print(target_moisture);
+    SERIAL.print(" and hysteresis = ");
+    SERIAL.println(hysteresis);
+
+    SERIAL.print("consecutive low readings = ");
+    SERIAL.print(consecutiveLowReadings);
+    SERIAL.print(" vs. threshold of ");
+    SERIAL.println(requiredConsecutiveReadings);
+
+    SERIAL.print("Pump is ");
+    SERIAL.println(pump_on);
   }
 
   if (actual_water_level <= min_water_level) {
@@ -241,20 +281,36 @@ void handleSensorsAndLogic() {
     if (out_of_water_display == false) {
       out_of_water_display = true;
     }    
-    if (pump_on == true and actual_water_level >= (min_water_level + hysteresis)) {
+    if (pump_on == true) {
       turnOffPump();
     }
   } else {
     if (out_of_water_display == true) {
       out_of_water_display = false;
     }
-    if (current_moisture_level > (target_moisture + hysteresis)) {
-      if (pump_on == true) {
-        turnOffPump();
+
+    if (pump_on == true) {
+      if (current_moisture_level > (target_moisture + hysteresis)) {
+        consecutiveHighReadings++;
+        if (consecutiveHighReadings >= requiredConsecutiveReadings) {
+          turnOffPump();
+          consecutiveHighReadings = 0;
+        }
+        consecutiveLowReadings = 0;
+      } else {
+        consecutiveHighReadings = 0;
       }
     } else {
-      if (pump_on == false) {
-        turnOnPump();
+      if (current_moisture_level < target_moisture) {
+        // Increment the counter if the moisture level is below the target
+        consecutiveLowReadings++;
+        if (consecutiveLowReadings >= requiredConsecutiveReadings) {
+          turnOnPump();
+        }
+        consecutiveHighReadings = 0;
+      } else {
+        // Reset counter if the moisture level is above the target
+        consecutiveLowReadings = 0;
       }
     }
   }
@@ -271,10 +327,7 @@ void setup() {
   
   attachInterrupt(digitalPinToInterrupt(WIO_5S_RIGHT), increaseTargetMoistureLevel, RISING);
   attachInterrupt(digitalPinToInterrupt(WIO_5S_LEFT), decreaseTargetMoistureLevel, RISING);
-  attachInterrupt(digitalPinToInterrupt(WIO_KEY_A), toggleLCDBacklight, FALLING);
-  attachInterrupt(digitalPinToInterrupt(WIO_KEY_B), toggleLCDBacklight, FALLING);
-  attachInterrupt(digitalPinToInterrupt(WIO_KEY_C), toggleLCDBacklight, FALLING);
-
+  
   initializeDisplay();
   
   current_moisture_level = getSoilMoistureLevel();
@@ -291,6 +344,23 @@ void loop() {
   old_moisture_level = current_moisture_level;
 
   unsigned long currentMillis = millis();
+
+  if (digitalRead(WIO_KEY_A) == LOW && !buttonPressed) {
+      unsigned long currentTime = millis();
+      if ((currentTime - lastDebounceTime) > DEBOUNCE_DELAY) {
+          buttonPressed = true;
+          lastDebounceTime = currentTime;
+          toggleLCDBacklight();
+          Serial.println("Button A pressed");
+      }
+  }
+
+  // Reset button state after the debounce delay
+  if (buttonPressed && (millis() - lastDebounceTime) > DEBOUNCE_DELAY) {
+      if (digitalRead(WIO_KEY_A) == HIGH) {
+          buttonPressed = false;
+      }
+  }
 
   if (currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis;
